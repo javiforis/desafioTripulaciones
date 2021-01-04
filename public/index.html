@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>i-mask</title>
+    <script defer src="/public/cameraTool.js"></script>
+</head>
+<body>
+    <!-- <div class="container">
+        <div class="search">
+             <input type="search" id= "searchBar"class="searchTerm">
+        </div>
+        
+        <ul id="productsList"></ul>
+    
+    </div> -->
+
+    <!-- Stream video via webcam -->
+	<div class="video-wrap">
+	    <video id="video" playsinline autoplay></video>
+	</div>
+	<!-- error show -->
+	<span id="errorMsg"></span>
+	<!-- Trigger canvas web API -->
+	<div class="controller">
+	    <button id="snap">Capture</button>
+		<button id="switch-camera">Switch Camera</button>
+		<button id="send">Send image</button>
+	</div>
+
+	<!-- Webcam video snapshot -->
+	<canvas id="canvas" width="640" height="480"></canvas>
+
+</body>
+</html>
