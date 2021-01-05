@@ -1,60 +1,47 @@
-//DEPENDENCIAS
-
-//Server
-
 const express = require("express");
 const server = express();
 const cors = require("cors");
-const myPublicFiles = express.static("../public");
+const myPublicFiles = express.static("./public");
+const multer = require("multer");
+const fetch = require("node-fetch");
+const dotenv = require ("dotenv").config();
+const bodyParser = require("body-parser");
+const cookieParser = require("cookie-parser");
 const Port = 8080;
 
-// const { query } = require("express");
-// const { CLIENT_RENEG_WINDOW } = require("tls");
-// const { Server } = require("http");
-
-//Otros
-
-const multer = require("multer");
-const mysql = require("mysql");
-const fetch = require("node-fetch");
-const crypto = require ("crypto");
-const dotenv = require ("dotenv").config();
-const cookieParser = require("cookie-parser");
-const base64 = require("base-64");
-const SECRET = process.env.SECRET_JWT;
-const bodyParser = require("body-parser");
-const options = {
-
-	"maxAge": 1000 * 60 * 15 * 4 * 24 * 15, // would expire after 15 days		////// OPTIONS DE JWT//////
-	"httpOnly": true, // The cookie only accessible by the web server
-	"signed": true // Indicates if the cookie should be signed
-};
-const Facebook = require("./lib/OauthFacebook");
+const Facebook = require("./lib/OauthFacebook.js");
 const facebook = new Facebook();
 const fs = require("fs");
+
 const upload = multer();
 const JWT = require("./lib/JWT.js");
 const {CredentialsValidator, EmailValidator, PasswordValidator} = require("./lib/validator.js");
 const {getGoogleAuthURL, getGoogleUser} = require("./lib/OauthGoogle.js");
 const {PromiseConnectionDB} = require("./lib/ConnectionDB.js");
+const {FirebaseUpload, getDate} = require("./lib/Firebase/fbStorage.js");
+const optionsJWT = {
+	"maxAge": 1000 * 60 * 15 * 4 * 24 * 15, // would expire after 15 days		////// OPTIONS DE JWT//////
+	"httpOnly": true, // The cookie only accessible by the web server
+	"signed": true // Indicates if the cookie should be signed
+};
+
 
 //Middlewares
-
-server.use(myPublicFiles);
 server.use(bodyParser.urlencoded({"extended":false}));
-server.use(cors());
-server.use(express.static(__dirname + "/public"));
-server.use(bodyParser.urlencoded({extended: true}));
-
-////Others Middlewares/////////
-server.use(cookieParser(SECRET));
 server.use(bodyParser.json());
+server.use(cookieParser());
+server.use(myPublicFiles);
+server.use(cors());
+// server.use(express.static(__dirname + "/public"));
+// server.use(bodyParser.urlencoded({extended: true}));
 
 
-////////////////////////////////////////////VALIDATORS//////////////////////////////////////////////////////
+////////////////////// GET //////////////////////////////
 
-
-// Oauth Google
+server.get("/logout", (req, res) =>{
+    res.clearCookie(JWT);
+    res.redirect("http://localhost:8080");
+});
 
 server.get("/google-redirect", (req, res) => {
 	res.redirect(getGoogleAuthURL());
@@ -186,112 +173,248 @@ server.get("/facebook-login", async (req, res) => {
 
 });
 
-////COMPROBACIÓN DEL JWT/////
-server.get("/jwt", (req, res) => {
+server.get("/get-mask-dashboard", (req, res) => {
 
-	const Payload = {
+	PromiseConnectionDB()
+	.then(DBconnection => {
 
-		"userName": "Admin",
-		"iat": new Date(),
-		"role": "Admin",
-		"ip": req.ip
-	};
-	const JWT = generateJWT(Payload);
-	res.cookie("jwt", JWT, {"httpOnly": true});
-	res.send("Hola Mundo");
+		const sql = `SELECT * FROM maskdata`;
+		DBconnection.query(sql, (err, result) => {
+			if(err)
+				res.send({"res" : "-1", "msg" : err});
+
+			else {
+				res.send({"res" : "1", "msg" : "data found", result});
+			}
+			DBconnection.end();	
+		})
+	})
+	.catch(e => res.send({"res" : "-2", "msg" : "error in database", e}));
 });
 
-/////////////////CAMERA STUFF//////////////////////
+server.get("/get-mask-by-filters", (req, res) => {
 
-function getDate() {
-	let date = new Date();
+	const {respiratory, children, sport} = req.query;
 
-	return `${date.getFullYear()}-${date.getMonth() + 1}-${date.getDate()}-${date.getHours()}-${date.getMinutes()}-${date.getSeconds()}-${date.getMilliseconds()}`
-}
+	if(respiratory && children && sport ){
 
-server.post("/upload", upload.none(), (req, res) => {
-    const {img} = req.body;
-    var base64Data = img.replace(/^data:image\/png;base64,/, "");
-    fs.writeFile(`./public/imgs/${getDate()}.png`, base64Data, "base64", (e) => console.log(e));
-    res.send({"msg": "Image stored"});
-})
+		PromiseConnectionDB()
+		.then(DBconnection =>{
 
-///REGISTER///
-server.post("/register", (req, res) => {
+			const sql = `SELECT MD.* 
+							FROM maskdata AS MD 
+							WHERE MD.respiratory = ?
+								AND MD.children = ? 
+								AND MD.sport = ? ;`;
 
-	let newUser = req.body;
-	console.log(newUser);
-
-    if(newUser.Name && newUser.Email && newUser.Password){
-		let validated = CredentialsValidator(newUser.Email, newUser.Password);
-		if(validated){
-			connection.query(`SELECT * FROM User WHERE Email = "${newUser.Email}";`, function (err, result){ 
-				console.log(result)
-				if(err){
-					console.log(err);
-					return;
+			DBconnection.query(sql,[respiratory, children, sport], (err, result) =>{
+				if(err)
+					res.send({"res" : "-1", "msg" : err});
+				else {
+					res.send({"res" : "1", "msg" : "data found", result});
 				}
-				
-				if (!result.length){//Si buscamos el email y da un array vacio =>registramos user
-					
-					connection.query(`INSERT INTO User (Name,Password,Email,Avatar) VALUES ("${newUser.Name}","${newUser.Password}","${newUser.Email}","${newUser.Avatar}");`)
-					
-					const Payload = {
-						"userName": newUser.Name,
-						"userPassword": newUser.Password,
-						"userEmail": newUser.Email,
-						"userAvatar":newUser.Avatar,
-								"iat": new Date(),
-								"role": "User",
-								"ip": req.ip
-							};
-					
-					res.cookie("jwt", generateJWT(Payload),options).send({"msg": "New user has been created."});
-				}else{
-					res.send("User name or Email already exists")
+				DBconnection.end();	
+			})
+		})
+		.catch(e => res.send({"res" : "-2", "msg" : "error in database", e}));
+
+	} else {
+		res.send({"res" : "-3", "msg" : "no req.query"})	
+	}			
+});
+
+server.get("/get-mask-detail", (req, res) => {
+
+	const {idMask} = req.query;
+	if(idMask){
+
+		PromiseConnectionDB()
+		.then(DBconnection => {
+
+			const sql = "SELECT MD.* FROM maskdata AS MD WHERE MD.id = ?";
+			DBconnection.query(sql, [idMask], (err, result) => {
+				if(err)
+					res.send({"res" : "-1", "msg" : err});
+				else {
+					res.send({"res" : "1", "msg" : "detail of mask found", result});
+				}
+				DBconnection.end();
+			})
+		})
+		.catch(e => res.send({"res" : "-2", "msg" : "error in database", e}));
+	} else {
+		res.send({"res" : "-3", "msg" : "no req.query"})
+	}
+});
+
+server.get("/get-user-profile", (req, res) => {
+
+	const { usrid } = JWT.getJWTInfo(req.cookies.jwt);
+
+	if(usrid){
+		PromiseConnectionDB()
+		.then(DBconnection => {
+			const sql = "SELECT U.name, U.usrid FROM users AS U where U.usrid = ?";
+			DBconnection.query(sql, [usrid], (err, result) => {
+				if(err)
+					res.send({"res" : "-1", "msg" : err});
+				else {
+					res.send({"res" : "1", "msg" : "user found", result});
+				}
+				DBconnection.end();
+			})
+		})
+		.catch(e => res.send({"res" : "-2", "msg" : "error in database", e}));
+
+	} else {
+		res.send({"res" : "-3", "msg" : "no usrid or error in JWT"})
+	}
+});
+
+server.get("/get-user-mask", (req, res) => {
+
+	const {usrid} = JWT.getJWTInfo(req.cookies.jwt);
+	if(usrid){
+
+		PromiseConnectionDB()
+		.then(DBconnection =>{
+			const sql = `SELECT ref_idMaskData, MD.name, MD.type, MD.type2
+								FROM users AS U JOIN UserMasks AS UM 
+													ON UM.ext_usrid = U.usrid 
+												JOIN maskdata AS MD 
+													ON MD.id = ref_idMaskData 
+												WHERE U.usrid = ?;`;
+
+			DBconnection.query(sql, [usrid], (err, result) => {
+				if(err)
+					res.send({"res" : "-1", "msg" : err});
+				else {
+					res.send({"res" : "1", "msg" : "masks from personal list found", result});
 				}
 			})
-		}else{
-			res.send("Usuario o Contraseña NO válidos")
-		}	
-	}else{
-		res.send("Please, Complete Credentials");
-		connection.end();
-		
+		})
+		.catch(e => res.send({"res" : "-2", "msg" : "error in database", e}));
+
+	} else {
+		res.send({"res" : "-3", "msg" : "no usrid or error in JWT"})
 	}
-	
 })
-///LOGIN///
-server.post("/login", (req, res) => {
-	 
-	let {email, psw} = req.body;
 
-	if(email && psw){
+////////////////////// POST ///////////////////////
+server.post("/register", (req, res) => {
 
+	const {name, email, psw} = req.body;
+
+    if(name && email && psw){
 		const validated = CredentialsValidator(email, psw);
 
 		if(validated){
+			PromiseConnectionDB()
+            .then((DBconnection) => {
+
+                const sql = "SELECT U.* FROM users U INNER JOIN PersonalUsers PU ON PU.ext_usrid = U.usrid WHERE email = ?";
+                DBconnection.query(sql, [email], (err, result) => {
+                    if (err){
+                        res.send({"res" : "-1", "msg" : err})
+
+                    } else if (result.length){
+						res.send({"res" : "0", "msg" : "user already registered"});
+						//tendras que redireccionar en front a login con algun settimeout despues de mostrarle un mensaje de que ya esta registrado
+                    } else {
+						const sql = "INSERT INTO users (email,name) VALUES (?, ?)";
+						DBconnection.query(sql, [email, name], (err, result) => {
+							if(err)
+								res.send({"res" : "-2", "msg" : err});
+							else {
+								const idResultInsert = result.insertId;
+								const {password, salt} = JWT.encryptPassword(psw)
+
+								const sql = "INSERT INTO PersonalUsers (ext_usrid, psw, salt) VALUES (?, ?, ?)";
+                        		DBconnection.query(sql, [idResultInsert, password, salt], err => {
+									if(err)
+										res.send({"res" : "-3", "msg" : err})
+									else {
+
+										const Payload = {
+											"usrid" : idResultInsert,
+											"name" : name,
+											"email": email,
+											"iat": new Date(),
+											// "role": "User",
+											// "ip":req.ip
+										};
+
+										const jwt = JWT.generateJWT(Payload);
+										const jwtVerified = JWT.verifyJWT(jwt);
+
+										if(jwtVerified){
+											res.cookie("jwt", jwt , {optionsJWT})
+											res.send({"res" : "1", "msg": "Logged¡"});
+											//redireccionas en front a dashboard
+
+										} else {
+											res.send({"res" : "-4", "msg" : "JWT not verified"})
+										}
+									}
+								})
+							}
+							DBconnection.end();
+						})
+                    }
+                });
+            })
+            .catch(e => res.send({"res" : "-5", "msg" : "error in database", "e" : console.error(e)}))    
+		}else{
+			res.send({"res" : "-6", "msg" : "Error in credentials"})
+		}	
+	}else{
+		res.send({"res" : "-7", "msg" : "no req.body"})	
+	}
+});
+
+server.post("/login", (req, res) => {
+	 
+	let {email, password} = req.body;
+
+	if(email && password){
+
+		// const validated = CredentialsValidator(email, psw);
+		const validated = EmailValidator(email);
+
+		if(validated){
+
+			// const {encryptedPsw, salt} = JWT.verifyPassword(psw, realPassword);
 
 			PromiseConnectionDB()
 			.then(DBconnection => {
 
-				const sql = `SELECT U.* FROM users AS U JOIN PersonalUsers AS PU ON U.usrid = PU.ext_usrid WHERE PU.psw = ? AND U.email = ?`;
-				DBconnection.query(sql, [psw, email], (err, result) => {
+				const sql = `SELECT PU.psw, PU.salt FROM PersonalUsers AS PU JOIN users AS U ON PU.ext_usrid = U.usrid WHERE U.email = ?`;
+				DBconnection.query(sql, [email], (err, result) => {
 					if(err){
 						res.send({"res" : "-1", "msg" : err})
 					} else if(result.length){
 
-						const Payload = {
-							"usrid" : result[0].usrid,
-							"name" : result[0].name,
-							"email": result[0].email,
-							"iat": new Date(),
-							// "role": "User",
-							// "ip":req.ip
-						};
+						const realPassword = result;
+						const myRealPassword = JWT.verifyPassword(password, realPassword);
+						console.log(myRealPassword);
 
-						res.cookie("jwt", generateJWT(Payload),options)
-						res.send({"res" : "1", "msg": "Logged¡", result});
+
+						// const sql = `SELECT U.* FROM users AS U JOIN PersonalUsers AS PU ON U.usrid = PU.ext_usrid WHERE U.email = ? AND PU.psw = ? AND PU.salt = ?`;
+						// DBconnection.query(sql, [email,], (err, result) => {
+
+						// 	const Payload = {
+						// 		"usrid" : result[0].usrid,
+						// 		"name" : result[0].name,
+						// 		"email": result[0].email,
+						// 		"iat": new Date(),
+						// 		// "role": "User",
+						// 		// "ip":req.ip
+						// 	};
+	
+						// 	res.cookie("jwt", generateJWT(Payload),options)
+						// 	res.send({"res" : "1", "msg": "Logged¡", result});
+
+						// })
 
 					} else {
 						res.send({"res" : "-2", "msg" : "user not registered yet"})
@@ -310,223 +433,107 @@ server.post("/login", (req, res) => {
 	}
 });
 
-///SEARCH PRODUCTS/// 
+server.post("/save-photo", upload.none(), (req, res) => {
 
-server.get("/get-mask-dashboard", (req, res) => {
-
-	PromiseConnectionDB()
-	.then(DBconnection => {
-
-		const sql = `SELECT * FROM maskdata`;
-		DBconnection.query(sql, (err, result) => {
-			if(err)
-				res.send({"res" : "-1", "msg" : err});
-
-			else {
-				res.send({"res" : "1", "msg" : "data found", result});
-			}
-			DBconnection.end();	
-		})
-	})
-	.catch(e => res.send({"res" : "-2", "msg" : "error in database", e}));
-})
-///SEARCH PRODUCT DETAILS///
-server.get("/searchProducts/Details",(req, res) => {
-	// const {search} = req.query;
-	console.log({search})
-	SQLquery(`SELECT * FROM Products WHERE idProduct = ${search};`,[search])
-			.then((result)=>{
-					console.log(result)
-					const Product = {
-							"Name" : result[0].Name,
-							"img": result[0].Picture,
-							"Brand": result[0].Brand,
-							"Description": result[0].Description,
-							"Ingredients" : result[0].Ingredients
-					}
-					console.log(Product);
-					res.send(Product)
-			});
-	connection.end();					
-})
-
-// ENDPOINT BUSCADOR MASCARILLAS
-
-server.get("/search", (req, res) => {
-    connection.query(`SELECT * FROM maskdata`, (err, result) => {
-        if(err) {
-            res.send(err);
-        }else {
-            const Maskdata = result.map (maskdata => {
-                return {
-                    "Name": maskdata.name,
-                    "Type": maskdata.type,
-                    "Reusable": maskdata.reusable,
-                    "Price": maskdata.price,
-                    "Certificate": maskdata.certificate
-                }
-            });
-            res.send(Maskdata);
-        }
-    })
-        connection.end();
+	const {img} = req.body;
+	
+    var base64Data = img.replace(/^data:image\/png;base64,/, "");
+    fs.writeFile(`./public/imgs/${getDate()}.png`, base64Data, "base64", err => {
+		if(err)
+			res.send({"res" : "-1", "msg" : "writefile failed"});
+		else {
+			res.send({"res" : "1", "msg" : "writefile correctly"});
+		}
+	});
 });
 
-// ENDPOINT MOSTRAR INFORMACION MASCARILLAS
+server.post("/upload-photo-to-firebase", upload.none() , async (req, res) => {
 
-server.get("/show-info", (req, res) => {
-    connection.query("SELECT")
-})
-///LISTA DE PRODUCTOS DEL HERBOLARIO SELECCIONADO ///
+	const {img} = req.body;
+	
+	if (img){
 
-server.get("/searchRetailer/Products", (req, res) => {
-	const {search} = req.query
-	SQLquery(`SELECT p.Name, p.Brand, p.Category , p.Picture FROM Retailer AS r JOIN Stock AS s ON r.idRetailer = s.id_Retailer JOIN Products AS p ON p.idProduct = s.id_Product WHERE r.idRetailer = ?`,[search])
-	.then(
-	(err, result) => {
-		if(err) {
-			res.send(err);
+		const url = await FirebaseUpload(img);
+		//Deberia generar una url y un id { url, idPhoto} = await FirebaseUpload();
+		if(url){
+			res.send({"res" : "1", url});
 		} else {
-			const products = result.map(products => {
-				return {
-					"Name": products.Name,
-					"Brand": products.Brand,
-					"Category": products.Category,
-					"Picture":products.Picture
-				}
-			});
-
-			res.send(products);
+			res.send({"res" : "-1", "msg" : "img was not uploaded"});
 		}
-	})
-	connection.end();
-})
+		
+	} else
+		res.send({"error": "No image provided"})
+	// res.send({"url": await FirebaseUpload(img)});
+});
 
-////USER PROFILE///
-server.get("/User",(req, res) => {
-	const {search} = req.query;
-	SQLquery(`SELECT * FROM User WHERE Email = "${search}";`,[search])
-			.then((result)=>{
-					console.log(result)
-					res.send(result)
-			});
-	connection.end();					
-})
+server.post("/add-personal-mask", (req, res) => {
 
-///EDIT USER PROFILE///	
-server.put("/User/Edit/:idUser",(req, res)=>{
-	const idUser = req.params.idUser;
-	console.log(idUser);
-	if(idUser){
-	connection.query(`SELECT * FROM User WHERE idUser = ${idUser};`,(err, result)=>{
-		if(err){
-			res.send(err);
+	const {usrid} = JWT.getJWTInfo(req.cookies.jwt);
+	
+	if(usrid){
+
+		const {id, name, shop, type, type2, reusable, price, certificate, effectiveness, expiration, respiratory, children, sport} = req.body;
+		
+		if(id && usrid){
+
+			PromiseConnectionDB()
+			.then(DBconnection => {
+				const sql = "INSERT INTO maskdata (id) VALUES (?);";
+				DBconnection.query(sql,[id], (err, result) => {
+					if(err)
+						res.send({"res" : "-1", "msg" : err});
+					else {
+
+						const resultId = result.insertId;
+						const sql = "INSERT INTO UserMasks (ext_usrid, ref_idMaskData) VALUES (?, ?);";
+						DBconnection.query(sql, [usrid, resultId], err => {
+							if(err)
+								res.send({"res" : "-2", "msg" : err});
+							else {
+								res.send({"res" : "1", "msg" : "mask added to personal list"});
+							}
+							DBconnection.end();
+						})
+					}
+				})
+			})
+			.catch(e => res.send({"res" : "-3", "msg" : "error in database", e}));
+		} else {
+			res.send({"res" : "-4", "msg" : "no id of mask"})
 		}
-		if(result){
-			console.log(result);
-			const changes = req.body
-			const UserChange ={
-				"idUser": idUser,
-				"Name": changes.Name,
-				"Surname": changes.Surname, 
-				"Password": changes.Password, 
-				"Email": changes.Email,
-				"Avatar": changes.Avatar ? `"${changes.Avatar}"` : `NULL`
-			}
-		if(changes.Name && changes.Surname && changes.Password && changes.Email){
-			let validated = CredentialsValidator(changes.Email, changes.Password);
-			if(validated){
+	} else {
+		res.send({"res" : "-5", "msg" : "no usrid from JWT"})
+	}
+});
 
-				connection.query(`UPDATE User SET  Name = "${changes.Name}",Surname ="${changes.Surname}", Password ="${changes.Password}", Email ="${changes.Email}", Avatar = ${UserChange.Avatar} WHERE idUser = ${idUser};`)
+//////////------ PUT ---------/////////////////////
+server.put("/change-user-name", (req, res) => {
 
-				const Payload = {
-				"userName": changes.Name,
-				"userSurname": changes.Surname,
-				"userPassword": changes.Password,
-				"userEmail": changes.Email,
-				"userAvatar":changes.Avatar,
-				"iat": new Date(),
-				"role": "User",
-				"ip": req.ip
-				};
-				res.cookie("jwt", generateJWT(Payload),options).send({"msg": "User has been changed."});
-			
-				}else{
-				res.send("User or password NOT valid");
+	const {usrid, name, newName} = req.body;
+
+	if(usrid && name && newName){
+
+		PromiseConnectionDB()
+		.then(DBconnection => {
+			const sql = `UPDATE users SET name = ? WHERE usrid = ? AND name = ?;`;
+			DBconnection.query(sql, [newName, usrid, name], err => {
+				if(err)
+					res.send({"res" : "-1", "msg" : err});
+				else {
+					res.send({"res" : "1", "msg" : `Updated ${name} with ${newName}`})
 				}
-		}else{
-			res.send("User name or Email don't exists")
-		}	
-		}connection.end();
-	})
-	
-
-	}	
-})
-	
-///U SER'S FAVS LIST //
-
-server.get("/Favs",(req,res)=>{
-	const {search} = req.query
-	SQLquery(`SELECT p.Name, p.Brand, p.Category, p.Picture FROM Products AS p JOIN Favs as f ON p.idProduct = f.idProduct WHERE f.idUser = ?`,[search])
-		.then(
-			(err,result)=>{
-				if(err){
-					res.send(err);
-				}else{
-					const favs = result.map(favs =>{
-						return {
-							"Name":favs.Name,
-							"Brand": favs.Brand, 
-							"Category": favs.Category,
-							"Picture": favs.Picture
-						}
-					});
-					res.send(favs)
-				}
-			}
-		)
-	connection.end();
-})
-
-///Delete FAV ////
-
-server.get("/DeleteFav", async (req, res)=>{
-	const {user,favid} = req.query;
-	SQLquery(`DELETE FROM Favs WHERE idUser = ? AND idProduct= ?`,[user,favid])
-		.then(
-			(err,result)=>{
-				if(err){
-					res.send(err);}
-				if(result){
-					res.send("Fav Deleted")
-				}
+				DBconnection.end();
 			})
-	connection.end();
-})
+		})
+		.catch(e => res.send({"res" : "-2", "msg" : "error in database", e}));
 
-///SHOW USER'S FOLDERS FAVS///
+	} else {
+		res.send({"res" : "-3", "msg" : "no usrid or name or newName"})
+	}
+});
 
-server.get("/ShowUserFolders", async (req,res)=>{
-	const {userid} = req.query;
-	SQLquery('SELECT * FROM FolderFavs WHERE idUser =?',[userid])
-		.then(
-			(err,result)=>{
-				if(err){
-					res.send(err);
-				}
-				if(result){
-					res.send(result);
-				}
-			})
-	connection.end();
-})
 
-// server.get("/ShowFolderContent", async (req,res)=>{
-// 	const {}
-// })
-			
-//////////////////////////////////////////////
+
 ////////LISTENING PORT/////////
 
 server.listen(Port,() => {

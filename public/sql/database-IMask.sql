@@ -43,14 +43,17 @@ CREATE TABLE IF NOT EXISTS UsersGoogle(
 
 CREATE TABLE maskdata (
 	id INT NOT NULL AUTO_INCREMENT,
-    name VARCHAR(300) NOT NULL,
-    shop VARCHAR(100) NOT NULL,
-    type VARCHAR(100) NOT NULL,
-    reusable VARCHAR(100) NOT NULL,
-    expiration VARCHAR(100) NOT NULL,
-    price DOUBLE NOT NULL,
-    effectiveness VARCHAR(100) NOT NULL,
-    durability VARCHAR(100) NOT NULL,
-    link VARCHAR(100) NOT NULL,
+    name VARCHAR(900),
+    shop VARCHAR(900),
+    type VARCHAR(200),
+    type2 VARCHAR(600),
+    reusable INT(11),
+    price DECIMAL(10,3),
+    certificate VARCHAR(255),
+    effectiveness VARCHAR(300),
+    expiration TIME,
+    respiratory INT(11),
+    children INT(11),
+    sport INT(11),
     PRIMARY KEY (id)
 );
